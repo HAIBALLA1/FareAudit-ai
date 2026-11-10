@@ -1,0 +1,81 @@
+# =========================
+# PYTHON
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+
+# =========================
+# ENVIRONNEMENTS VIRTUELS
+# =========================
+.venv/
+venv/
+env/
+
+# =========================
+# PYCHARM / IDE
+# =========================
+.idea/
+.vscode/
+*.iml
+
+# =========================
+# VARIABLES D'ENVIRONNEMENT
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# PYTEST / COVERAGE
+# =========================
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# =========================
+# BUILD / PACKAGING
+# =========================
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# =========================
+# LOGS
+# =========================
+*.log
+logs/
+
+# =========================
+# MACHINE LEARNING
+# =========================
+mlruns/
+mlartifacts/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.pkl
+*.joblib
+
+# =========================
+# DONNÉES LOCALES
+# =========================
+data/raw/
+data/processed/
+data/private/
+
+# =========================
+# JUPYTER NOTEBOOK
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# SYSTEME LINUX
+# =========================
+*~
+.Trash-*/
