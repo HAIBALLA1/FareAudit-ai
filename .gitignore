@@ -8,7 +8,7 @@ __pycache__/
 # =========================
 # ENVIRONNEMENTS VIRTUELS
 # =========================
-.venv/
+venv/
 venv/
 env/
 
@@ -79,3 +79,6 @@ data/private/
 # =========================
 *~
 .Trash-*/
+
+.venv/
+*.pyc
