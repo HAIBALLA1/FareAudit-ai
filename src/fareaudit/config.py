@@ -1,10 +1,9 @@
-
 from pathlib import Path
 
-# Racine du projet
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# Racine du projet FareAudit-ai
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# Emplacements des fichiers
+# Chemin du dataset Parquet
 DATA_PATH = (
     PROJECT_ROOT
     / "data"
@@ -12,18 +11,23 @@ DATA_PATH = (
     / "yellow_tripdata_2025-01.parquet"
 )
 
+# Chemin de sauvegarde du modèle
 MODEL_PATH = (
     PROJECT_ROOT
     / "models"
     / "isolation_forest.joblib"
 )
 
-# Paramètres
+# Paramètres du pipeline
 SAMPLE_SIZE = 100_000
 RANDOM_STATE = 42
 TEST_SIZE = 0.20
 
-# Colonnes à lire depuis le Parquet
+# Période d'analyse
+START_DATE = "2025-01-01"
+END_DATE = "2025-02-01"
+
+# Colonnes à charger avec PyArrow
 READ_COLUMNS = [
     "tpep_pickup_datetime",
     "trip_distance",
@@ -33,7 +37,7 @@ READ_COLUMNS = [
     "payment_type",
 ]
 
-# Variables pour le Machine Learning
+# Variables utilisées par Isolation Forest
 MODEL_FEATURES = [
     "trip_distance",
     "fare_amount",
@@ -43,7 +47,7 @@ MODEL_FEATURES = [
     "payment_type",
 ]
 
-# Signification des types de paiement
+# Types de paiement
 PAYMENT_LABELS = {
     0: "Tarif flexible",
     1: "Carte bancaire",
