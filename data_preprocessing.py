@@ -1,4 +1,4 @@
-
+from sklearn.ensemble import IsolationForest
 import pandas as pd
 import pyarrow.parquet as pq
 
@@ -125,3 +125,43 @@ print(X.head())
 print("\nDimensions :", X.shape)
 
 print("\nColonnes :", X.columns.tolist())
+
+
+
+
+# 1. Créer le modèle
+model = IsolationForest(
+    n_estimators=100,
+    contamination=0.02,
+    random_state=42,
+    n_jobs=-1
+)
+
+# 2. Entraîner le modèle
+model.fit(X)
+
+# 3. Prédire les anomalies
+predictions = model.predict(X)
+
+# 4. Ajouter les résultats dans notre DataFrame
+df["anomaly_ml"] = predictions == -1
+
+# 5. Compter les anomalies détectées
+print("\nAnomalies détectées par Isolation Forest :")
+print(df["anomaly_ml"].sum())
+
+# 6. Afficher les premières anomalies
+anomalies_ml = df[df["anomaly_ml"]]
+
+print("\nExemples d'anomalies détectées :")
+print(
+    anomalies_ml[
+        [
+            "trip_distance",
+            "fare_amount",
+            "tip_amount",
+            "total_amount",
+            "payment_label"
+        ]
+    ].head(10).to_string(index=False)
+)
