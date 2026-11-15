@@ -1,8 +1,8 @@
-from fareaudit.vector_store import index_documents
+from src.fareaudit.retriever import retriever
 
-retriever=index_documents()
-docs = retriever.invoke(
-    "Pourquoi un paiement est-il contesté ?"
-)
-print(type(retriever))
+retriever=retriever()
 
+docs=retriever.invoke( "Pourquoi un paiement est-il contesté ?")
+
+for doc in docs:
+    print(doc.page_content)
