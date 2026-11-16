@@ -1,16 +1,9 @@
-
 import numpy as np
 import pandas as pd
-
 from .config import PAYMENT_LABELS
 
-
 def prepare_data(df):
-
-    # Ne pas modifier le DataFrame original
     data = df.copy()
-
-    # Convertir la date en datetime
     data["tpep_pickup_datetime"] = pd.to_datetime(
         data["tpep_pickup_datetime"],
         errors="coerce"

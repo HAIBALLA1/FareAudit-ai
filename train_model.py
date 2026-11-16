@@ -1,19 +1,15 @@
 import joblib
-
 from src.fareaudit.config import (
     DATA_PATH,
     MODEL_PATH,
     SAMPLE_SIZE,
 )
-
 from src.fareaudit.data_loader import load_sample
 from src.fareaudit.data_preprocessing import prepare_data
-
 from src.fareaudit.features import (
     chronological_split,
     encode_features,
 )
-
 from src.fareaudit.modeling import (
     train_model,
     predict_test,
@@ -21,7 +17,6 @@ from src.fareaudit.modeling import (
 
 
 def main():
-
     if not DATA_PATH.is_file():
         raise FileNotFoundError(
             f"Dataset introuvable : {DATA_PATH}"
@@ -31,19 +26,10 @@ def main():
         DATA_PATH,
         sample_size=SAMPLE_SIZE,
     )
-
-    print("Trajets chargés :", len(df))
-
-    # ETAPE 2 : Data Preprocessing
-    print("\n2. Préparation des données...")
-
+    # Data Preprocessing
     df = prepare_data(df)
 
-    print("Trajets conservés :", len(df))
-
-    # ETAPE 3 : Séparation Train / Test
-    print("\n3. Séparation chronologique...")
-
+    #Séparation Train / Test
     train_df, test_df = chronological_split(df)
 
     X_train, X_test = encode_features(
@@ -78,7 +64,6 @@ def main():
         parents=True,
         exist_ok=True,
     )
-
     joblib.dump(
         {
             "model": model,

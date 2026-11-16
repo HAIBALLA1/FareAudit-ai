@@ -1,33 +1,33 @@
-
+from pandas import DataFrame
 from sklearn.ensemble import IsolationForest
 
 from .config import RANDOM_STATE
 
 
-def train_model(X_train):
+N_ESTIMATORS = 100
+CONTAMINATION = 0.02
+
+
+def train_model(X_train: DataFrame) -> IsolationForest:
+    """Entraîne un modèle Isolation Forest."""
 
     model = IsolationForest(
-        n_estimators=100,
-        contamination=0.02,
+        n_estimators=N_ESTIMATORS,
+        contamination=CONTAMINATION,
         random_state=RANDOM_STATE,
-        n_jobs=-1
+        n_jobs=-1,
     )
 
-    # Entraînement uniquement sur le train
     model.fit(X_train)
 
     return model
 
-#cette fonction est pour le test
-def predict_test(model, X_test):
 
-    # Prédiction sur les données non vues
+def predict_test(model: IsolationForest, X_test: DataFrame):
+    """Retourne les indicateurs d'anomalie et les scores."""
+
     predictions = model.predict(X_test)
-
-    # Convertir en booléens
     is_anomaly = predictions == -1
-
-    # Score d'anomalie
     scores = model.decision_function(X_test)
 
     return is_anomaly, scores

@@ -1,15 +1,12 @@
-
 import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-
 from .config import (
     READ_COLUMNS,
     RANDOM_STATE,
     SAMPLE_SIZE,
 )
-
 
 def load_sample(
     path,
@@ -23,19 +20,14 @@ def load_sample(
             f"Fichier introuvable : {path}"
         )
 
-    # 2. Ouvrir le fichier Parquet
     parquet = pq.ParquetFile(path)
-
-    # 3. Nombre total de lignes
     total = parquet.metadata.num_rows
 
     if total == 0:
         raise ValueError("Le fichier Parquet est vide")
 
-    # 4. Nombre de lignes à sélectionner
     n = min(sample_size, total)
 
-    # 5. Générateur aléatoire
     rng = np.random.default_rng(seed)
 
     # 6. Sélectionner des positions aléatoires

@@ -1,11 +1,7 @@
-
 import pandas as pd
-
 from .config import MODEL_FEATURES, TEST_SIZE
 
-
 def chronological_split(df, test_size=TEST_SIZE):
-
     # Trier les trajets par date
     ordered = df.sort_values(
         "tpep_pickup_datetime"
