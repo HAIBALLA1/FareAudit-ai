@@ -1,5 +1,5 @@
-
 from functools import lru_cache
+from typing import Any
 
 import joblib
 import pandas as pd
@@ -8,70 +8,60 @@ from .config import MODEL_PATH
 from .schemas import TripInput
 
 
-# Charger le modèle une seule fois par processus
 @lru_cache(maxsize=1)
-def load_model():
+def load_model() -> dict[str, Any]:
+    """Charge le modèle sauvegardé une fois par processus."""
 
     if not MODEL_PATH.is_file():
         raise FileNotFoundError(
             f"Modèle introuvable : {MODEL_PATH}"
         )
 
-    donnees_modele = joblib.load(MODEL_PATH)
-
-    return donnees_modele
+    return joblib.load(MODEL_PATH)
 
 
-def predict_trip(trip: TripInput):
+def prepare_trip_features(
+    trip: TripInput,
+    feature_columns: list[str],
+) -> pd.DataFrame:
+    """Transforme une course dans le format attendu par le modèle."""
 
-    # 1. Charger le modèle entraîné
+    trip_data = trip.model_dump()
+
+    payment_type = trip_data.pop("payment_type")
+    payment_column = f"payment_type_{payment_type}"
+
+    if payment_column not in feature_columns:
+        raise ValueError(
+            f"Type de paiement non reconnu par le modèle : "
+            f"{payment_type}"
+        )
+
+    X = pd.DataFrame([trip_data])
+
+    X[payment_column] = 1
+
+    return X.reindex(
+        columns=feature_columns,
+        fill_value=0,
+    )
+
+
+def predict_trip(trip: TripInput) -> dict:
+    """Prédit si une course est anormale."""
+
     donnees_modele = load_model()
 
     model = donnees_modele["model"]
-
     feature_columns = donnees_modele["feature_columns"]
 
-    # 2. Convertir les données en dictionnaire
-    trip_data = trip.model_dump()
+    X = prepare_trip_features(trip, feature_columns)
 
-    # 3. Récupérer le type de paiement
-    payment_type = trip_data.pop("payment_type")
-
-    payment_column = f"payment_type_{payment_type}"
-
-    # Vérifier que cette catégorie était présente
-    # pendant l'entraînement
-    if payment_column not in feature_columns:
-        raise ValueError(
-            f"Type de paiement {payment_type} "
-            "non présent dans les données "
-            "d'entraînement du modèle"
-        )
-
-    # 4. Créer un DataFrame d'une ligne
-    X = pd.DataFrame([trip_data])
-
-    # 5. One-Hot Encoding
-    X[payment_column] = 1
-
-    # 6. Reproduire exactement les colonnes
-    # utilisées pendant l'entraînement
-    X = X.reindex(
-        columns=feature_columns,
-        fill_value=0
-    )
-
-    # 7. Prédiction
     prediction = int(model.predict(X)[0])
+    score = float(model.decision_function(X)[0])
 
-    # 8. Score d'anomalie
-    score = float(
-        model.decision_function(X)[0]
-    )
-
-    # 9. Construire la réponse
     return {
         "prediction": prediction,
         "is_anomaly": prediction == -1,
-        "anomaly_score": score
+        "anomaly_score": score,
     }
