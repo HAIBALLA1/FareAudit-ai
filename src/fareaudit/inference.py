@@ -5,6 +5,8 @@ import joblib
 import pandas as pd
 
 from .config import MODEL_PATH
+from .schemas import TripInput
+
 
 @lru_cache(maxsize=1)
 def load_model() -> dict[str, Any]:
@@ -45,7 +47,7 @@ def prepare_trip_features(
     )
 
 
-def predict_trip(trip) -> dict:
+def predict_trip(trip: TripInput) -> dict:
     """Prédit si une course est anormale."""
 
     donnees_modele = load_model()
