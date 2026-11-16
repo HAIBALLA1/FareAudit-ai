@@ -17,19 +17,19 @@ def load_model():
             f"Modèle introuvable : {MODEL_PATH}"
         )
 
-    bundle = joblib.load(MODEL_PATH)
+    donnees_modele = joblib.load(MODEL_PATH)
 
-    return bundle
+    return donnees_modele
 
 
 def predict_trip(trip: TripInput):
 
     # 1. Charger le modèle entraîné
-    bundle = load_model()
+    donnees_modele = load_model()
 
-    model = bundle["model"]
+    model = donnees_modele["model"]
 
-    feature_columns = bundle["feature_columns"]
+    feature_columns = donnees_modele["feature_columns"]
 
     # 2. Convertir les données en dictionnaire
     trip_data = trip.model_dump()

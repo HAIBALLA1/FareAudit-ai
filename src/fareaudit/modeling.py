@@ -18,7 +18,7 @@ def train_model(X_train):
 
     return model
 
-
+#cette fonction est pour le test
 def predict_test(model, X_test):
 
     # Prédiction sur les données non vues
