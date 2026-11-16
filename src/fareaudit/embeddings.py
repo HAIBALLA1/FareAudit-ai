@@ -17,7 +17,7 @@ def get_embeddings_model():
 
     return model
 
-#cette fonction je l'utilise pas vu que j'utilise desormais CHromDM
+#cette fonction je l'utilise plus vu que j'utilise desormais CHromDM
 #qui prends en charge l'embeding elle meme avec  la classe Chroma
 @lru_cache(maxsize=1)
 def doc_embddings():
