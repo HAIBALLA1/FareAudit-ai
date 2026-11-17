@@ -4,5 +4,6 @@ pandas
 numpy
 scikit-learn
 pytest
+httpx
 pyarrow
 langchain-core
