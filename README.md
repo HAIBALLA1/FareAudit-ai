@@ -1,85 +1,96 @@
 # FareAudit AI
 
-**Anomaly detection for NYC taxi fares, with a document-retrieval layer for contextual investigation.**
+**Anomaly detection and contextual investigation for NYC taxi trips.**
 
-FareAudit AI is an end-to-end ML engineering project built around a practical question: **which taxi trips deserve a closer look, and how can an analyst investigate them efficiently?** It combines a data-processing and unsupervised-learning pipeline, a REST API for inference, and semantic retrieval over supporting documents.
+FareAudit AI is an end-to-end machine learning application that identifies unusual taxi fare patterns and supports further investigation through semantic document retrieval. It brings together **data engineering, unsupervised learning, API design, retrieval systems, automated testing, and container delivery** in a modular Python codebase.
 
-The project emphasizes **clear component boundaries, consistent training/inference features, testable behavior, and a path toward automated delivery**. It is an engineering prototype, not a production fraud-detection system.
+The system is designed around a straightforward workflow: **prepare trip data → train an anomaly detector → serve predictions through an API → retrieve relevant context when needed**.
 
-**Stack:** Python 3.11 · PyArrow · Pandas · NumPy · scikit-learn · FastAPI · Pydantic · LangChain · Hugging Face · ChromaDB · pytest · Docker · GitHub Actions
+**Tech stack:** Python 3.11 · PyArrow · Pandas · NumPy · scikit-learn · FastAPI · Pydantic · LangChain · Hugging Face · ChromaDB · pytest · Docker · GitHub Actions · GitHub Container Registry
 
-> **Project status — active development (November 2026).** Model training, inference, document retrieval, a Docker image, and automated pytest checks are in place. Automated image publishing, deployment, and LLM-based answer generation are planned or being developed; they should not be considered live features yet.
+## Overview
 
-## The problem
+Taxi fares are influenced by multiple interacting factors, including distance, pickup time, payment method, fare amount, and additional charges. A trip that looks ordinary along one dimension can be unusual when these attributes are considered together.
 
+FareAudit AI addresses this problem with two complementary capabilities:
 
-Taxi trip records contain combinations of distance, fare, tip, total charge, payment method, and pickup time that may be unusual. Handwritten thresholds are useful, but they cannot capture every atypical combination of features.
+- **ML-based anomaly detection:** an Isolation Forest model identifies statistically unusual trip records and exposes its decisions through a structured REST API.
+- **Contextual document retrieval:** an embedding-based search pipeline indexes reference material in ChromaDB and retrieves relevant passages for investigation.
 
-FareAudit AI uses an **Isolation Forest** to flag statistically unusual trips for review. A separate **retrieval component** helps surface relevant documentation, rather than treating an anomaly score as an explanation on its own.
+The prediction and retrieval components are deliberately decoupled, allowing them to be developed, tested, and operated independently.
 
-**A detected anomaly is not evidence of fraud.** The model identifies observations worth investigating; it does not establish intent, wrongdoing, or a validated fraud probability.
+## Key capabilities
 
-## What the project does
+| Area | Implementation |
+| --- | --- |
+| Data ingestion | Read and process NYC taxi trip data stored in Parquet format with PyArrow and Pandas |
+| Feature engineering | Clean records, derive model inputs, encode payment methods, and preserve feature consistency between training and inference |
+| Anomaly detection | Train and serialize an Isolation Forest model using scikit-learn |
+| Model serving | Expose structured predictions and anomaly scores through FastAPI |
+| Input validation | Enforce request contracts with Pydantic |
+| Semantic retrieval | Generate Hugging Face embeddings, index passages in ChromaDB, and retrieve them with LangChain |
+| Automated tests | Run pytest checks through GitHub Actions on pushes and pull requests |
+| Container delivery | Build Docker images and automatically publish commit-tagged images to GitHub Container Registry after successful CI checks on `main` |
 
-| Component | Responsibility | Status |
-| --- | --- | --- |
-| Data pipeline | Read Parquet data, clean records, and prepare ML features | Implemented |
-| Anomaly detection | Train and serialize an Isolation Forest model | Implemented |
-| Inference | Rebuild model-compatible features and return a structured prediction | Implemented |
-| REST API | Validate requests and expose application functionality via FastAPI | Implemented |
-| Document retrieval | Embed documents and retrieve relevant passages with ChromaDB | Implemented |
-| Quality checks | Run automated Python tests with pytest and GitHub Actions | Implemented; coverage expanding |
-| Containerization | Build a Docker image for the API | Built locally |
-| Automated delivery | Publish versioned images and deploy the service | In progress |
-| LLM answer generation | Generate grounded answers from retrieved documents | Planned |
-
-## System architecture
+## Architecture
 
 ```mermaid
 flowchart TD
-    A[NYC Taxi trip data<br/>Parquet] --> B[Data loading & cleaning]
-    B --> C[Feature engineering<br/>chronological split & encoding]
-    C --> D[Isolation Forest training]
-    D --> E[(Serialized model<br/>joblib)]
+    subgraph Training[Model training]
+        A[NYC Taxi Parquet data] --> B[Data loading and cleaning]
+        B --> C[Feature engineering and chronological split]
+        C --> D[Isolation Forest]
+        D --> E[(Serialized model and feature metadata)]
+    end
 
-    F[API client] --> G[FastAPI & Pydantic]
-    G --> H[Inference service]
-    H --> I[Feature alignment]
-    I --> E
-    H --> J[Prediction + anomaly score]
+    subgraph Serving[Prediction API]
+        F[API client] --> G[FastAPI and Pydantic]
+        G --> H[Inference service]
+        H --> I[Feature encoding and alignment]
+        I --> E
+        H --> J[Prediction and anomaly score]
+    end
 
-    K[Reference documents] --> L[Chunking & embeddings<br/>Hugging Face]
-    L --> M[(ChromaDB)]
-    G --> N[Retrieval service]
-    N --> M
-    N --> O[Relevant document passages]
+    subgraph Retrieval[Semantic document retrieval]
+        K[Reference documents] --> L[Chunking and Hugging Face embeddings]
+        L --> M[(ChromaDB)]
+        G --> N[Retrieval service]
+        N --> M
+        N --> O[Relevant document passages]
+    end
 ```
 
-The **prediction path** and the **retrieval path** are deliberately separated. This keeps ML inference independent from document search and makes both components easier to test and evolve.
+### Design principles
 
-## Data and modeling
+**Training–serving consistency.** Inference reconstructs the features expected by the fitted model, including one-hot encoded payment types and the original feature order.
 
-The initial experiment uses **NYC TLC Yellow Taxi trip data (January 2025)**, stored as Parquet. PyArrow supports sampling from a larger source file without loading the entire dataset into memory.
+**Separation of concerns.** Input validation, feature preparation, model inference, and document retrieval have distinct responsibilities, keeping the system easier to maintain and test.
 
-The training workflow covers data preparation, chronological splitting, categorical encoding of `payment_type`, model fitting, and serialization of the inference artifact to `models/isolation_forest.joblib`.
+**Reproducible delivery.** The application is containerized, and the CI workflow builds and publishes Docker images only after automated checks pass on the `main` branch.
 
-### Initial experiment snapshot
+## Data pipeline and anomaly detection
 
-| Measure | Observed value |
+The modeling workflow uses **NYC TLC Yellow Taxi data from January 2025**, supplied as Parquet files. PyArrow supports efficient access to columnar trip records, while Pandas and NumPy are used to prepare model inputs.
+
+The pipeline performs data preparation, a chronological train/test split, categorical encoding, Isolation Forest training, and serialization of the resulting model artifact.
+
+### Experiment snapshot
+
+| Metric | Value |
 | --- | ---: |
 | Trips sampled | 100,000 |
 | Records retained after cleaning | 99,999 |
-| Training rows | 79,999 |
-| Test rows | 20,000 |
+| Training records | 79,999 |
+| Test records | 20,000 |
 | Model features | 10 |
-| Test trips flagged as anomalous | 369 |
-| Share flagged in that test set | 1.845% |
+| Test records flagged as anomalous | 369 |
+| Share of test records flagged | 1.845% |
 
-These values describe an **exploratory experiment**, not a fraud-detection accuracy benchmark. The configured contamination level sets an anomaly threshold during fitting; it does **not** imply a known proportion of fraudulent trips. Without reliable ground-truth labels, precision, recall, and fraud-detection accuracy cannot be claimed.
+These figures describe the recorded experiment and the model's anomaly-flagging behavior. Isolation Forest produces an **unsupervised anomaly signal**, not a verified fraud classification or a fraud probability.
 
-### Inference contract
+### Prediction contract
 
-Requests are validated with **Pydantic**. A trip includes the following fields:
+Trip requests are validated with Pydantic. Example input:
 
 ```json
 {
@@ -92,7 +103,7 @@ Requests are validated with **Pydantic**. A trip includes the following fields:
 }
 ```
 
-The inference layer aligns inputs with the **feature names and order expected by the trained model**, including one-hot encoded payment types. The response has this shape:
+Example response shape:
 
 ```json
 {
@@ -102,54 +113,60 @@ The inference layer aligns inputs with the **feature names and order expected by
 }
 ```
 
-*The response above is illustrative, not an actual prediction for the example trip.* In scikit-learn's Isolation Forest, `prediction` is **`-1` for an outlier** and **`1` for an inlier**. The `anomaly_score` is the model's decision-function output, **not a calibrated probability**; negative values fall on the anomalous side of the decision threshold.
+*These values illustrate the API response format; they are not a computed prediction for the sample request.*
 
-## Document retrieval (RAG foundation)
+In scikit-learn's Isolation Forest, `-1` indicates an outlier and `1` indicates an inlier. The `anomaly_score` represents the model's decision-function output; values below zero are on the anomalous side of the threshold.
 
-The retrieval subsystem is designed to support investigations with relevant reference material:
+## Semantic document retrieval
 
-1. Load and split reference documents into manageable passages.
-2. Generate multilingual embeddings using a Hugging Face sentence-transformer model.
-3. Persist vectors in **ChromaDB**.
-4. Retrieve relevant passages with LangChain for a user question.
+The document-retrieval pipeline complements the anomaly detector with searchable reference material. It:
 
-The current scope is **retrieval**. Connecting an LLM to produce grounded, source-aware answers is a future extension; retrieved text alone should not be presented as an LLM-generated explanation.
+1. Loads and splits source documents into passages.
+2. Generates embeddings using a Hugging Face sentence-transformer model.
+3. Stores vector representations in **ChromaDB**.
+4. Retrieves passages relevant to a query using **LangChain**.
 
-## Project layout
+This component supports context discovery alongside model predictions without coupling the retrieval pipeline to anomaly scoring.
+
+## Repository structure
 
 ```text
 FareAudit-ai/
-├── .github/workflows/       # Automated CI workflows
-├── data/                    # Local datasets (not necessarily tracked)
-├── knowledge/               # Reference documents for retrieval
-├── chroma_db/               # Local vector-store persistence
-├── models/                  # Trained model artifacts
-├── src/fareaudit/           # Application and ML modules
-│   ├── schemas.py           # Pydantic input/output contracts
-│   └── inference.py         # Model inference logic
-├── tests/                   # Automated tests
-├── main.py                  # FastAPI application entry point
-├── train_model.py           # Model training entry point
-├── requirements.txt         # Python dependencies
-├── Dockerfile               # Container build instructions
-└── .dockerignore            # Docker build-context exclusions
+├── .github/
+│   └── workflows/
+│       └── ci.yml             # Tests and Docker image publishing
+├── src/
+│   └── fareaudit/
+│       ├── schemas.py         # Pydantic request models
+│       └── inference.py       # Prediction and feature preparation integration
+├── tests/                     # Automated Python tests
+├── models/                    # Model artifacts
+├── knowledge/                 # Documents used for retrieval
+├── chroma_db/                 # Local vector database
+├── data/                      # Input data
+├── main.py                    # FastAPI entry point
+├── train_model.py             # Model training entry point
+├── requirements.txt           # Python dependencies
+├── Dockerfile                 # Container image definition
+└── .dockerignore              # Docker build-context exclusions
 ```
 
-Only representative modules are shown under `src/fareaudit/`; consult the repository for the full package structure.
+*The `src/fareaudit/` directory is shown with representative modules; consult the repository for its full contents.*
 
 ## Getting started
 
 ### Prerequisites
 
-- Python **3.11**
-- `pip` and `venv`
-- The required local data/model artifacts for the workflow you intend to run
-- Docker (optional, for containerized execution)
+- Python 3.11
+- `pip` and Python virtual environments
+- Docker for containerized execution
+- The dataset and model artifacts required for the workflow being executed
 
-### Install
+### Install dependencies
+
+From the repository root:
 
 ```bash
-# From the repository root
 python3.11 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -158,13 +175,13 @@ python -m pip install -r requirements.txt
 
 ### Train the model
 
-Place the source Parquet file at the configured dataset path (the initial workflow uses `data/raw/yellow_tripdata_2025-01.parquet`) and run:
+Place the source Parquet data at the path configured by the training script. The initial workflow uses `data/raw/yellow_tripdata_2025-01.parquet`.
 
 ```bash
 python train_model.py
 ```
 
-The trained artifact is expected at `models/isolation_forest.joblib`. Large datasets and serialized models are typically managed outside Git; ensure they are available before running inference.
+The trained model is expected at `models/isolation_forest.joblib`. Ensure that the required model artifact is available when running inference.
 
 ### Run the API locally
 
@@ -172,7 +189,7 @@ The trained artifact is expected at `models/isolation_forest.joblib`. Large data
 uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Open **http://127.0.0.1:8000/docs** for the interactive OpenAPI documentation and the currently implemented routes. This documentation is the source of truth for endpoint paths and request schemas as the API evolves.
+Open **http://127.0.0.1:8000/docs** to explore the available FastAPI routes and request schemas.
 
 ### Build and run with Docker
 
@@ -184,57 +201,60 @@ docker run --rm --name fareaudit-api \
   fareaudit:1.0
 ```
 
-The Docker image was built successfully in the local development environment. **A successful image build does not, by itself, verify API startup or inference.** If your `.dockerignore` excludes model artifacts or the vector database, provide them at runtime through appropriate mounts or initialize them separately.
+The Docker image packages the application and its installed dependencies. Ensure that any model artifacts or persistent retrieval data required at runtime are included in the image or made available through appropriate mounts.
 
-## Tests and continuous integration
+## Testing and quality engineering
 
-The test suite uses **pytest**, including **mocking and monkeypatching** to isolate inference behavior from model loading and feature preparation.
+FareAudit AI uses **pytest** to validate the application's behavior. Unit tests cover input validation and inference contracts, with `Mock` and `monkeypatch` allowing model-dependent logic to be tested independently of model loading or the actual estimator.
+
+Run the test suite locally:
 
 ```bash
 python -m pytest tests/ -v
 ```
 
-The workflow at `.github/workflows/ci.yml` runs tests automatically on GitHub Actions. It provides a clean environment to catch regressions that could otherwise be hidden by a developer's local setup.
+This approach helps keep tests fast, focused, and independent of external model artifacts where appropriate.
 
-Current test work focuses on:
+## CI and automated container delivery
 
-- Pydantic input validation and invalid numerical values.
-- Inference output contracts for both normal and anomalous predictions.
-- Feature preprocessing and alignment with trained-model columns.
-- API response and error-path coverage.
+The GitHub Actions workflow is defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-**CI is operational; test coverage is still being expanded.** Publishing Docker images to GHCR and deploying them to a target environment are separate delivery steps and are not claimed as complete here.
+It implements a dependency-aware delivery process:
 
-## Engineering decisions and trade-offs
+```mermaid
+flowchart LR
+    A[Push or pull request] --> B[Python setup]
+    B --> C[Install dependencies]
+    C --> D[pytest]
+    D -->|Successful push to main| E[Docker Buildx]
+    E --> F[GHCR authentication]
+    F --> G[Build and publish image]
+```
 
-| Decision | Rationale / limitation |
+**CI checks:** pushes and pull requests trigger the `tests` job, which installs project dependencies and runs pytest on a GitHub-hosted Ubuntu runner.
+
+**Container publishing:** on successful pushes to `main`, the `build-and-push` job builds the Docker image and publishes it to **GitHub Container Registry (`ghcr.io`)**. The image is tagged using both `latest` and the Git commit SHA, providing a direct link between the published artifact and its source revision.
+
+**Release safety:** the publication job declares `needs: tests`, so it does not run when the test job fails. The workflow automates image delivery; deployment to a runtime environment is a separate operation.
+
+## Engineering choices
+
+| Choice | Engineering rationale |
 | --- | --- |
-| Isolation Forest | Unsupervised approach suitable for anomaly triage when trustworthy fraud labels are unavailable; output is not a fraud verdict. |
-| Chronological train/test split | Evaluates on later observations and reduces temporal leakage compared with arbitrary mixing. |
-| One-hot encoding and feature alignment | Keeps inference inputs compatible with the representation used during training. |
-| Pydantic schemas | Defines a clear input contract and rejects invalid requests before inference. |
-| Separated prediction and retrieval components | Supports independent testing, debugging, and future evolution. |
-| Docker | Packages application code and dependencies; runtime model and data artifacts still need explicit management. |
-| GitHub Actions + pytest | Provides repeatable, automated checks before further delivery stages. |
+| **Isolation Forest** | Detects unusual multivariate patterns without requiring labeled anomaly examples |
+| **Chronological evaluation split** | Preserves temporal ordering between training and evaluation data |
+| **Model-aware feature alignment** | Prevents column-order and categorical-encoding mismatches during inference |
+| **Pydantic** | Makes the inference input contract explicit and validates requests before model execution |
+| **Modular inference and retrieval** | Keeps model predictions and document search independently testable |
+| **Docker** | Packages application dependencies and runtime configuration in a portable image |
+| **GitHub Actions + GHCR** | Couples automated tests to traceable, commit-tagged container publication |
 
-## Roadmap
+## Dataset
 
-- [x] Implement an initial Parquet-to-Isolation-Forest pipeline.
-- [x] Expose model inference through a FastAPI application.
-- [x] Implement semantic document retrieval using embeddings and ChromaDB.
-- [x] Containerize the API and validate the image build locally.
-- [x] Run automated tests with GitHub Actions.
-- [ ] Expand unit and API integration tests; measure coverage.
-- [ ] Pin dependencies and introduce model/data artifact versioning.
-- [ ] Add Docker build and GHCR publication after successful CI checks.
-- [ ] Deploy to a selected environment with health checks and rollback strategy.
-- [ ] Add LLM-based, citation-grounded investigation responses and evaluate them.
-- [ ] Add operational monitoring and drift-aware evaluation.
+The initial modeling workflow is based on the **NYC Taxi & Limousine Commission (TLC) Yellow Taxi Trip Records**, January 2025. The dataset is used for fare-pattern analysis and unsupervised anomaly detection.
 
-## Scope and limitations
-
-This is a **learning and engineering prototype**. It currently demonstrates anomaly identification and contextual document retrieval, but it does not provide verified fraud labels, calibrated fraud probabilities, production monitoring, or a deployed LLM assistant. Predictions should be used to **prioritize human review**, not as automated adverse decisions.
+Source: [NYC TLC Trip Record Data](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page).
 
 ---
 
-**FareAudit AI** · Python · Machine Learning · Retrieval · API Engineering · MLOps
+**FareAudit AI** · Machine Learning Engineering · Anomaly Detection · FastAPI · Retrieval · MLOps
