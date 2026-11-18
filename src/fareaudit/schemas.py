@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, ConfigDict
 
 class TripInput(BaseModel):
 
+    #on veut interdire les champs extra et les valeurs infini ou nane
     model_config = ConfigDict(
         extra="forbid",
         allow_inf_nan=False
