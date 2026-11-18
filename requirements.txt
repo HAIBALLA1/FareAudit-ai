@@ -7,3 +7,6 @@ pytest
 httpx
 pyarrow
 langchain-core
+langchain-chroma
+langchain-huggingface
+langchain-text-splitters

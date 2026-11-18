@@ -1,0 +1,25 @@
+# Environnement virtuel Python
+.venv/
+
+# Git et GitHub
+.git/
+.github/
+
+# IDE
+.idea/
+
+# Cache Python et pytest
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Fichiers temporaires
+*.log
+.env
+.env.*
+
+# Fichiers de tests
+tests/
+
+# Cache et fichiers temporaires
+.cache/
