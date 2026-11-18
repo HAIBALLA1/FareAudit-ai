@@ -1,4 +1,3 @@
-
 import joblib
 
 from src.fareaudit.config import DATA_PATH, MODEL_PATH, SAMPLE_SIZE

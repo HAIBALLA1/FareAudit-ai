@@ -3,6 +3,8 @@ from sklearn.ensemble import IsolationForest
 import pandas as pd
 from src.fareaudit import inference
 from src.fareaudit.schemas import TripInput
+import pytest
+
 
 VALID_TRIP ={
     "trip_distance" :12.5,
@@ -12,6 +14,18 @@ VALID_TRIP ={
     "pickup_hour" : 14,
     "payment_type" : 1
 }
+
+feature_columns = [
+    "trip_distance",
+    "fare_amount",
+    "tip_amount",
+    "total_amount",
+    "pickup_hour",
+    "payment_type_1",
+    "payment_type_2",
+    "payment_type_3",
+    "payment_type_4",
+]
 
 def test_predict_trip_anomaly(monkeypatch):
     trip = TripInput(**VALID_TRIP)
@@ -33,9 +47,13 @@ def test_predict_trip_anomaly(monkeypatch):
                         lambda trip, feature_columns: fake_X)
 
     result = inference.predict_trip(trip)
-    assert result ==  {
-                            "prediction": -1,
+    assert result ==  {     "prediction": -1,
                             "is_anomaly": True,
                             "anomaly_score": -0.08,
                         }
 
+def test_prepare_trip_features():
+    data = {**VALID_TRIP , "payment_type" : 7}
+
+    with pytest.raises(ValueError):
+        inference.prepare_trip_features(TripInput(**data) , feature_columns)
