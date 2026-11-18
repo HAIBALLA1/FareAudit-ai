@@ -1,5 +1,5 @@
-
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Literal
+from pydantic import BaseModel, Field, ConfigDict , model_validator
 
 
 class TripInput(BaseModel):
@@ -27,7 +27,20 @@ class TripInput(BaseModel):
 
 
 class PredictionOutput(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        allow_inf_nan=False
+    )
 
-    prediction: int
+    prediction: Literal[-1, 1]
     is_anomaly: bool
     anomaly_score: float
+
+    @model_validator(mode="after")
+    def check_prediction_consistency(self):
+        if self.is_anomaly != (self.prediction == -1):
+            raise ValueError(
+                "is_anomaly is inconsistent with prediction"
+            )
+
+        return self

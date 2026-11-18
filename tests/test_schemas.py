@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.fareaudit.schemas import TripInput
+from src.fareaudit.schemas import TripInput , PredictionOutput
 
 VALID_TRIP ={
     "trip_distance" :12.5,
@@ -12,16 +12,18 @@ VALID_TRIP ={
     "payment_type" : 1
 }
 
+INFR_RESULT ={
+             "prediction": -1,
+             "is_anomaly": True,
+             "anomaly_score": -0.08,
+            }
+
+
 
 def test_valid_trip():
     trip = TripInput(**VALID_TRIP)
 
-    assert trip.pickup_hour == 14
-    assert trip.payment_type == 1
-    assert trip.trip_distance == 12.5
-    assert trip.fare_amount == 45
-    assert trip.total_amount == 55
-    assert trip.tip_amount == 5
+    assert trip.model_dump() == VALID_TRIP
 
 
 def test_extra_field_forbidden():
@@ -61,3 +63,18 @@ def test_infinit_field_forbidden(invalid_value ,field ):
 
     with pytest.raises(ValidationError):
         TripInput(**data)
+
+
+def test_PredictionOutput():
+    model_output = PredictionOutput(**INFR_RESULT)
+
+    assert model_output.model_dump() == INFR_RESULT
+
+def test_TripOutput():
+    data={
+        **INFR_RESULT,
+        "prediction": 5,
+    }
+
+    with pytest.raises(ValueError):
+        PredictionOutput(**data)
