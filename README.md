@@ -1,105 +1,254 @@
 # FareAudit AI
 
-**Anomaly detection and contextual investigation for NYC taxi trips.**
+**Anomaly detection and evidence-based investigation for New York City taxi trips.**
 
-FareAudit AI is an end-to-end machine learning application that identifies unusual taxi fare patterns and supports further investigation through semantic document retrieval. It brings together **data engineering, unsupervised learning, API design, retrieval systems, automated testing, and container delivery** in a modular Python codebase.
+FareAudit AI is an end-to-end machine learning engineering project that detects statistically unusual taxi fares and retrieves relevant reference material to support an investigation. It combines a reproducible data pipeline, unsupervised anomaly detection, an inference API, multilingual semantic retrieval, evaluation experiments, and containerized delivery.
 
-The system is designed around a straightforward workflow: **prepare trip data → train an anomaly detector → serve predictions through an API → retrieve relevant context when needed**.
+> **Current status:** Anomaly detection, API serving, document indexing, and passage retrieval are implemented. **LLM-based answer generation is planned and is not presented as an existing feature.**
 
-**Tech stack:** Python 3.11 · PyArrow · Pandas · NumPy · scikit-learn · FastAPI · Pydantic · LangChain · Hugging Face · ChromaDB · pytest · Docker · GitHub Actions · GitHub Container Registry
+**Stack:** Python 3.11 · Pandas · NumPy · PyArrow · scikit-learn · FastAPI · Pydantic · LangChain · Sentence Transformers · ChromaDB · pytest · Docker · GitHub Actions · GitHub Container Registry (GHCR)
 
-## Overview
+---
 
-Taxi fares are influenced by multiple interacting factors, including distance, pickup time, payment method, fare amount, and additional charges. A trip that looks ordinary along one dimension can be unusual when these attributes are considered together.
+## Contents
 
-FareAudit AI addresses this problem with two complementary capabilities:
+1. [Problem and objectives](#problem-and-objectives)
+2. [System architecture](#system-architecture)
+3. [Data and anomaly detection](#data-and-anomaly-detection)
+4. [Multilingual document retrieval](#multilingual-document-retrieval)
+5. [Retrieval evaluation and parameter selection](#retrieval-evaluation-and-parameter-selection)
+6. [API and application behavior](#api-and-application-behavior)
+7. [Getting started](#getting-started)
+8. [Testing and CI/CD](#testing-and-cicd)
+9. [Repository structure](#repository-structure)
+10. [Engineering decisions and limitations](#engineering-decisions-and-limitations)
+11. [Roadmap](#roadmap)
+12. [Data source](#data-source)
 
-- **ML-based anomaly detection:** an Isolation Forest model identifies statistically unusual trip records and exposes its decisions through a structured REST API.
-- **Contextual document retrieval:** an embedding-based search pipeline indexes reference material in ChromaDB and retrieves relevant passages for investigation.
+## Problem and objectives
 
-The prediction and retrieval components are deliberately decoupled, allowing them to be developed, tested, and operated independently. **The current retrieval capability returns source passages; LLM-based answer generation is planned, not yet part of the implemented pipeline.**
+Taxi fares depend on several interacting variables: trip distance, time, payment method, fare components, and surcharges. An unusual combination of these features may warrant additional investigation, but an anomaly score alone does not explain the domain-specific meaning of the fields involved.
 
-## Key capabilities
+FareAudit AI separates this problem into **two complementary services**:
 
-| Area | Implementation |
-| --- | --- |
-| Data ingestion | Read and process NYC taxi trip data stored in Parquet format with PyArrow and Pandas |
-| Feature engineering | Clean records, derive model inputs, encode payment methods, and preserve feature consistency between training and inference |
-| Anomaly detection | Train and serialize an Isolation Forest model using scikit-learn |
-| Model serving | Expose structured predictions and anomaly scores through FastAPI |
-| Input validation | Enforce request contracts with Pydantic |
-| Semantic retrieval | Generate Hugging Face embeddings, index passages in ChromaDB, and retrieve them with LangChain |
-| Retrieval evaluation | Benchmark document retrieval with a manually curated question set and source-level Hit@K metrics |
-| Automated tests | Run pytest checks through GitHub Actions on pushes and pull requests |
-| Container delivery | Build Docker images and automatically publish commit-tagged images to GitHub Container Registry after successful CI checks on `main` |
+- **Anomaly detection:** an Isolation Forest model flags statistically unusual trips and provides a decision score through a REST API.
+- **Contextual retrieval:** a multilingual search pipeline retrieves relevant excerpts from NYC Taxi & Limousine Commission (TLC) documentation and project reference notes.
 
-## Architecture
+The design deliberately separates **prediction** from **document retrieval**. A negative anomaly score is **not** evidence of fraud and is **not** a calibrated fraud probability.
+
+## System architecture
 
 ```mermaid
-flowchart TD
-    subgraph Training[Model training]
-        A[NYC Taxi Parquet data] --> B[Data loading and cleaning]
-        B --> C[Feature engineering and chronological split]
-        C --> D[Isolation Forest]
-        D --> E[(Serialized model and feature metadata)]
+flowchart TB
+    subgraph Offline[Offline preparation]
+        P[NYC TLC Parquet trips] --> D[Cleaning and feature engineering]
+        D --> T[Train Isolation Forest]
+        T --> A[(Model artifact and feature metadata)]
+        K[PDF and Markdown references] --> S[Load and chunk documents]
+        S --> E[Multilingual MiniLM embeddings]
+        E --> V[(Persistent ChromaDB index)]
     end
-
-    subgraph Serving[Prediction API]
-        F[API client] --> G[FastAPI and Pydantic]
-        G --> H[Inference service]
-        H --> I[Feature encoding and alignment]
-        I --> E
-        H --> J[Prediction and anomaly score]
+    subgraph Online[Online application]
+        U[API client] --> F[FastAPI and Pydantic]
+        F --> I[Inference service]
+        I --> A
+        I --> O[Anomaly label and decision score]
+        F --> R[Retrieval service]
+        R --> V
+        R --> X[Relevant passages and sources]
     end
-
-    subgraph Retrieval[Semantic document retrieval]
-        K[Reference documents] --> L[Chunking and Hugging Face embeddings]
-        L --> M[(ChromaDB)]
-        G --> N[Retrieval service]
-        N --> M
-        N --> O[Relevant document passages]
-    end
-
-    subgraph Evaluation[Retrieval evaluation]
-        P[Curated questions and expected sources] --> Q[Retriever evaluation script]
-        Q --> N
-        Q --> R[Hit at 1 and Hit at 3]
+    subgraph Quality[Quality and delivery]
+        Q[pytest] --> CI[GitHub Actions]
+        CI --> C[Docker build and GHCR publish]
+        B[Retrieval benchmark] --> R
     end
 ```
 
-### Design principles
+The ML pipeline and knowledge index are prepared independently. At runtime, the API can serve predictions and expose retrieved document passages without requiring LLM generation.
 
-**Training–serving consistency.** Inference reconstructs the features expected by the fitted model, including one-hot encoded payment types and the original feature order.
+## Data and anomaly detection
 
-**Separation of concerns.** Input validation, feature preparation, model inference, and document retrieval have distinct responsibilities, keeping the system easier to maintain and test.
+### Dataset and feature pipeline
 
-**Reproducible delivery.** The application is containerized, and the CI workflow builds and publishes Docker images only after automated checks pass on the `main` branch.
+The recorded ML experiment uses **NYC TLC Yellow Taxi records for January 2025**, stored in Parquet format. PyArrow and Pandas support reading, cleaning, and feature engineering. Categorical inputs are encoded and aligned with the exact columns and order used during training.
 
-**Evidence-based retrieval improvements.** Retrieval changes are evaluated against a documented baseline, with a consistent question set and a freshly rebuilt index when chunking or embeddings change.
+```mermaid
+flowchart LR
+    A[Parquet trip records] --> B[Validation and cleaning]
+    B --> C[Feature engineering]
+    C --> D[Chronological split]
+    D --> E[Isolation Forest training]
+    E --> F[(Saved estimator and feature metadata)]
+    F --> G[Prediction API]
+```
 
-## Data pipeline and anomaly detection
+### Recorded experiment snapshot
 
-The modeling workflow uses **NYC TLC Yellow Taxi data from January 2025**, supplied as Parquet files. PyArrow supports efficient access to columnar trip records, while Pandas and NumPy are used to prepare model inputs.
-
-The pipeline performs data preparation, a chronological train/test split, categorical encoding, Isolation Forest training, and serialization of the resulting model artifact.
-
-### Experiment snapshot
-
-| Metric | Value |
-| --- | ---: |
+| Measure | Result |
+|---|---:|
 | Trips sampled | 100,000 |
-| Records retained after cleaning | 99,999 |
+| Records remaining after cleaning | 99,999 |
 | Training records | 79,999 |
 | Test records | 20,000 |
-| Model features | 10 |
+| Model input features | 10 |
 | Test records flagged as anomalous | 369 |
-| Share of test records flagged | 1.845% |
+| Fraction of test records flagged | 1.845% |
 
-These figures describe the recorded experiment and the model's anomaly-flagging behavior. Isolation Forest produces an **unsupervised anomaly signal**, not a verified fraud classification or a fraud probability.
+These are **descriptive results of one recorded experiment**, not fraud-detection precision or recall: no verified fraud labels are used to establish those metrics.
 
-### Prediction contract
+### Prediction semantics
 
-Trip requests are validated with Pydantic. Example input:
+In scikit-learn Isolation Forest, a prediction of `-1` denotes an outlier and `1` denotes an inlier. `decision_function` produces a decision score; values below zero fall on the anomalous side of the model threshold.
+
+The serving pipeline reconstructs training-time features, including one-hot encoded inputs and their order, to reduce training/serving skew.
+
+## Multilingual document retrieval
+
+### Knowledge sources
+
+The knowledge index includes official NYC TLC PDF documentation and project Markdown reference notes. Confirmed source files include:
+
+| Source | Purpose |
+|---|---|
+| `yellow_taxi_data_dictionary.pdf` | Field definitions and numeric codes for Yellow Taxi records |
+| `trip_record_user_guide.pdf` | Context on TLC trip records, zones, and datasets |
+| `payment_types.md` | Payment codes and interpretation |
+| `financial_fields.md` | Fare, tip, and total amount descriptions |
+| `investigation_rules.md` | Experimental internal guidance; **not official TLC fraud policy** |
+
+**Latest observed indexing run:** the loader reported **10 loaded document units** and **29 indexed chunks**. The load count is the ingestion script's reported count; it should not automatically be interpreted as ten distinct source filenames.
+
+### Retrieval pipeline
+
+```mermaid
+flowchart TB
+    A[PDF and Markdown files] --> B[Document loading and chunking]
+    B --> C[Sentence Transformers embeddings]
+    C --> D[(ChromaDB vector store)]
+    Q[User question in French or English] --> QE[Same embedding model]
+    QE --> D
+    D --> F[Candidate vector retrieval]
+    F --> M[MMR: relevance and diversity]
+    M --> K[Top 5 passages with source metadata]
+```
+
+**Embedding model:** `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`, run locally on CPU with normalized embeddings. It supports cross-language queries, such as a question written in French retrieving evidence from an English PDF.
+
+**Important:** changing an embedding model or chunking strategy requires rebuilding the index. Even embeddings with the same dimensions are not necessarily compatible across models.
+
+### Why MMR?
+
+A similarity search ranks passages by vector proximity to the question. **Maximal Marginal Relevance (MMR)** first considers a candidate pool and then selects passages while balancing relevance with diversity, reducing the likelihood of returning several near-duplicates.
+
+A simplified selection objective is:
+
+$$
+\operatorname{MMR}(d) = \lambda\,\operatorname{sim}(q,d)
+- (1-\lambda)\max_{s\in S}\operatorname{sim}(d,s)
+$$
+
+Here `q` is the question, `d` is a candidate passage, `S` is the already-selected set, and `lambda_mult` controls the relevance/diversity balance. The tested LangChain MMR implementation uses cosine similarity during this selection step.
+
+**Selected experimental retriever configuration:**
+
+```python
+from src.fareaudit.vector_store import get_vector_store
+
+
+def retriever():
+    db = get_vector_store()
+    return db.as_retriever(
+        search_type="mmr",
+        search_kwargs={
+            "k": 5,
+            "fetch_k": 15,
+            "lambda_mult": 0.8,
+        },
+    )
+```
+
+- **`k=5`:** return five passages to the caller.
+- **`fetch_k=15`:** form a candidate pool of up to fifteen passages for MMR selection. This parameter was **not independently optimized**.
+- **`lambda_mult=0.8`:** favor relevance over diversity; selected after an earlier comparison against `0.5`.
+
+## Retrieval evaluation and parameter selection
+
+Instead of selecting retriever parameters by intuition, FareAudit AI uses a **repeatable 24-question benchmark** with French and English queries. The experiments use the same indexed corpus and embedding model while comparing search strategies and retrieval depth.
+
+### Evaluation approach
+
+For each question, the evaluator records an expected source filename and an expected answer fragment. A returned passage is automatically marked relevant only when **both** the source and normalized text fragment match. The script then computes:
+
+- **Hit@1:** at least one accepted passage in the first result.
+- **Hit@K:** at least one accepted passage among the first `K` results.
+- **MRR:** mean reciprocal rank of the first accepted passage; a miss contributes zero.
+
+This is a **rule-based passage-match benchmark**, not a complete human relevance assessment. Semantically correct alternative wording or another valid source may be marked as a miss.
+
+### Experiment 1 — Similarity vs. MMR (`k=3`)
+
+| Retrieval configuration | Hit@1 | Hit@3 | MRR |
+|---|---:|---:|---:|
+| Similarity, k=3 | 75.00% | 87.50% | 0.8056 |
+| MMR, k=3, fetch_k=10, λ=0.5 | 75.00% | 79.17% | 0.7708 |
+| **MMR, k=3, fetch_k=10, λ=0.8** | **75.00%** | **91.67%** | **0.8194** |
+
+**Finding:** with the same three returned passages, `lambda_mult=0.8` achieved better observed Hit@3 and MRR than the other tested configurations. It was therefore retained for the next experiment. This is a within-benchmark result, not proof of global superiority.
+
+### Experiment 2 — Retrieval depth (`k`)
+
+| Retrieval configuration | Hit@1 | Hit@3 | Hit@5 | Hit@7 | MRR |
+|---|---:|---:|---:|---:|---:|
+| Similarity, k=3 | 75.00% | 87.50% | 87.50%* | 87.50%* | 0.8056 |
+| Similarity, k=5 | 75.00% | 87.50% | 95.83% | 95.83%* | 0.8243 |
+| Similarity, k=7 | 75.00% | 87.50% | 95.83% | 100.00% | 0.8313 |
+| **MMR, k=5, fetch_k=15, λ=0.8** | **75.00%** | **91.67%** | **100.00%** | **100.00%*** | **0.8403** |
+
+\* Values above the actual retrieval depth are carried forward from the results that were returned; they are **not independent searches at the larger depth**.
+
+### Diagnostic questions
+
+Three harder questions helped differentiate configurations:
+
+| Question | Similarity k=5 | Similarity k=7 | MMR k=5 |
+|---|---:|---:|---:|
+| `PULocationID` definition | Rank 5 | Rank 5 | **Rank 4** |
+| `DOLocationID` definition | Not retrieved | Rank 6 | **Rank 4** |
+| Voided-trip payment code | Rank 4 | Rank 4 | **Rank 3** |
+
+For this benchmark, **MMR with five returned passages recovered all 24 expected fragments**, whereas similarity at five returned passages recovered 23 of 24. Similarity needed seven returned passages to recover all 24.
+
+### Parameter selection workflow
+
+```mermaid
+flowchart TD
+    A[Fix corpus, embeddings, and 24 test questions]
+    --> B[Compare Similarity vs MMR at k=3]
+    B --> C[Evaluate Hit at 1, Hit at 3, and MRR]
+    C --> D[Retain MMR lambda 0.8 for depth experiment]
+    D --> E[Compare Similarity k=3, 5, 7 and MMR k=5]
+    E --> F[Inspect difficult queries and ranking]
+    F --> G[Select MMR: k=5, fetch_k=15, lambda=0.8]
+    G --> H[Use as provisional baseline for chunking experiments]
+```
+
+**Decision:** retain **MMR / `k=5` / `fetch_k=15` / `lambda_mult=0.8`** as the **current experimental baseline**, because it achieved the best recorded Hit@5 and MRR while returning fewer passages than Similarity k=7.
+
+**Caveat:** `fetch_k=15` was held as a chosen setting during the depth comparison and has not been tested against alternative candidate-pool sizes. Parameter selection was conducted on the evaluation questions themselves; a held-out question set is needed before claiming generalization.
+
+**Reproduce the retrieval evaluation:**
+
+```bash
+python evaluate_retriever.py
+```
+
+The evaluation invokes the real embedding model and persistent ChromaDB collection; it is an integration benchmark rather than a mocked unit test. Preserve the indexed corpus and question labels when comparing configurations.
+
+## API and application behavior
+
+### Input example
+
+A representative prediction payload is:
 
 ```json
 {
@@ -112,7 +261,7 @@ Trip requests are validated with Pydantic. Example input:
 }
 ```
 
-Example response shape:
+### Response shape
 
 ```json
 {
@@ -122,123 +271,109 @@ Example response shape:
 }
 ```
 
-*These values illustrate the API response format; they are not a computed prediction for the sample request.*
+These response values are **illustrative**, not the model's computed prediction for the sample request. Consult the interactive FastAPI documentation for the routes and required fields in your checked-out version:
 
-In scikit-learn's Isolation Forest, `-1` indicates an outlier and `1` indicates an inlier. The `anomaly_score` represents the model's decision-function output; values below zero are on the anomalous side of the threshold.
+```text
+http://127.0.0.1:8000/docs
+```
 
-## Semantic document retrieval
+The retrieval capability currently returns relevant passages and source metadata. A grounded natural-language answer generator with citations is **future work**.
 
-The document-retrieval pipeline complements the anomaly detector with searchable reference material. It:
+## Getting started
 
-1. Loads Markdown reference documents from `knowledge/`.
-2. Splits documents into chunks and preserves source-file metadata.
-3. Generates embeddings using a Hugging Face sentence-transformer model (MiniLM in the current baseline).
-4. Stores vector representations in a persistent **ChromaDB** collection.
-5. Uses **LangChain** to retrieve relevant passages for a query.
+### Requirements
 
-The current retrieval endpoint exposes the retrieved content and sources for investigation. It does **not** yet generate natural-language answers with an LLM. An answer-generation layer with citations is planned.
+- Python 3.11 and `pip`
+- A local virtual environment
+- Project dependencies from `requirements.txt`
+- Dataset and model artifacts for inference or training
+- Network access on first download of the embedding model, unless it is already cached locally
 
-### Current retrieval baseline
+### Setup
 
-| Setting | Current value |
-| --- | --- |
-| Embedding model | Sentence Transformers / MiniLM |
-| Vector database | ChromaDB (`fareaudit_knowledge`) |
-| Retrieval | Vector similarity, top 3 chunks |
-| Chunk size | 800 characters |
-| Chunk overlap | 100 characters |
-| Knowledge corpus | 3 Markdown files |
-| Indexed chunks | 4 after a clean rebuild |
+```bash
+git clone <YOUR_REPOSITORY_URL>
+cd FareAudit-ai
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
 
-The knowledge corpus currently contains:
+Replace `<YOUR_REPOSITORY_URL>` with the actual repository URL.
 
-- `payment_types.md` — NYC taxi payment codes and their interpretation.
-- `financial_fields.md` — definitions of fares, tips, totals, and trip distance.
-- `investigation_rules.md` — **experimental project rules**, not official NYC TLC fraud rules.
+### Train the anomaly detector
 
-These settings describe the **current baseline**, not permanently fixed design choices. Future experiments will compare chunking, embeddings, retrieval methods, and ranking strategies.
+Place the January 2025 NYC TLC Yellow Taxi Parquet file at the path expected by your training script (recorded project path: `data/raw/yellow_tripdata_2025-01.parquet`). Then run:
+
+```bash
+python train_model.py
+```
+
+The trained estimator is expected at `models/isolation_forest.joblib`. Ensure the feature metadata and model files required by inference are present.
 
 ### Rebuild the knowledge index
-
-Indexing is a separate development operation, similar to model training:
 
 ```bash
 python -m scripts.index_knowledge
 ```
 
-The current `index_documents()` implementation uses a **full collection reset** before indexing. Run this operation deliberately, preferably with the API stopped. It deletes the existing vectors in `fareaudit_knowledge` and recreates the index; it is **not** an incremental or zero-downtime production ingestion pipeline.
+**Index rebuild is destructive in the currently documented implementation:** it resets the existing ChromaDB collection and recreates its vectors. Back up any index you need to keep and avoid rebuilding while another process is using it. A clean rebuild is required after changing the embedding model or chunking parameters.
 
-Rebuild the index whenever you change the reference documents, chunking parameters, or embedding configuration. Verify that the stored chunk count matches the count produced by the current document splitter. Future work will introduce stable document/chunk identifiers and incremental updates.
+The latest recorded run reported:
 
-## Retriever evaluation
+```text
+Documents chargés : 10
+Chunks indexés : 29
+```
 
-FareAudit AI includes an experimental retrieval benchmark in [`evaluate_retriever.py`](evaluate_retriever.py). The benchmark tests whether the Retriever can find information needed to answer questions about NYC taxi transactions and the project's investigation rules.
+### Start the API
 
-### Evaluation setup
+```bash
+uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+```
 
-- **Evaluation set:** 12 manually written questions based on the three indexed Markdown documents.
-- **Reference labels:** one expected source file per question.
-- **Retrieval depth:** top 3 chunks per query; Hit@1 is computed from the first of those three results.
-- **Execution:** the real embedding model and ChromaDB collection are used, rather than mocked retrieval results.
+Open `http://127.0.0.1:8000/docs` to inspect and exercise the available endpoints.
 
-Run the evaluation from the repository root:
+### Evaluate retrieval
 
 ```bash
 python evaluate_retriever.py
 ```
 
-### Baseline results
+### Build a Docker image
 
-*Snapshot: November 2026. Refresh this table after each documented experimental run rather than treating these values as fixed benchmarks.*
+```bash
+docker build -t fareaudit:1.0 .
+docker run --rm --name fareaudit-api \
+  -p 127.0.0.1:8000:8000 \
+  fareaudit:1.0
+```
 
-| Metric | Result | Scope |
-| --- | ---: | --- |
-| **Hit@1** | **75%** (9/12) | 12 questions; expected source-file matching |
-| **Hit@3** | **100%** (12/12) | 12 questions; expected source-file matching |
-| **Precision@3** | **33.3%** | Manual, strict passage-level annotations on **3 selected questions** |
-| **MRR** | **0.444** | Manual, strict passage-level annotations on the **same 3 questions** |
+Make sure the Docker image or container mounts provide the model artifacts and ChromaDB index required for the runtime features you plan to use.
 
-**Important interpretation:** Hit@K checks whether at least one retrieved chunk belongs to the expected **file**, not whether that chunk contains the answer. Precision@3 and MRR were calculated separately from manual relevance judgments on three questions whose expected file was not ranked first; **they are not full-dataset scores**. The manually evaluated sample is deliberately difficult and should not be generalized to all queries.
+## Testing and CI/CD
 
-With only four indexed chunks, retrieving three chunks covers most of the corpus. The perfect Hit@3 therefore **does not demonstrate production-quality retrieval**.
+Unit and contract tests use **pytest** for validation and inference behavior. Model-heavy dependencies can be mocked when testing individual units; retrieval benchmarking is intentionally separate and uses real local artifacts.
 
-### What the evaluation revealed
+```bash
+python -m pytest tests/ -v
+```
 
-The first attempt to change chunk size left obsolete vectors in ChromaDB: **12 chunks remained indexed while the updated splitter produced only 4**. Consequently, irrelevant historical fragments sometimes appeared at the top of retrieval results.
+### Delivery flow
 
-A clean collection rebuild synchronized the stored vectors with the current chunking configuration. After the rebuild, the query **“What does `fare_amount` represent?”** retrieved `financial_fields.md` in first position. However, the **overall source-level Hit@1 remained 75%** across the 12-question benchmark; changing the ranking on one query did not improve the aggregate score.
+```mermaid
+flowchart LR
+    A[Push or pull request] --> B[GitHub Actions tests]
+    B --> C[Install Python dependencies]
+    C --> D[Run pytest]
+    D --> E{Push to main and tests pass?}
+    E -->|Yes| F[Docker Buildx]
+    F --> G[Publish image to GHCR]
+    E -->|No| H[No publication]
+```
 
-Because the earlier index contained stale chunks, this comparison does **not isolate the effect of chunk size**. Future controlled experiments must rebuild their indexes consistently before comparing configurations.
-
-### Planned retrieval experiments
-
-The project will evolve through measurable experiments rather than assuming that one technique is always better:
-
-| Experiment | What will change | What will be measured | Status |
-| --- | --- | --- | --- |
-| Larger corpus | Add verified reference documents and more varied questions | Hit@K, ranking quality, coverage | Planned |
-| Passage-level labels | Identify relevant chunk IDs/content rather than only filenames | Precision@K, Recall@K, MRR, potentially nDCG | Planned |
-| Chunking comparison | Compare chunk sizes, overlaps, and Markdown-aware splitting | Retrieval quality and context usefulness | Planned |
-| Embedding comparison | Compare embedding models suited to the query language | Ranking quality and retrieval latency | Planned |
-| Hybrid search | Combine vector retrieval with lexical keyword matching (e.g., BM25) | Accuracy on exact field names and paraphrases | Planned |
-| Reranking | Reorder candidate passages using a reranker | Precision@K and MRR | Planned |
-| No-answer queries | Add questions unsupported by the corpus | False retrieval confidence and abstention behavior | Planned |
-| LLM answer generation | Compose grounded answers from retrieved evidence | Answer correctness, faithfulness, source attribution | Planned |
-
-For meaningful comparisons, keep the **same evaluation questions, relevance judgments, corpus version, and retrieval depth** for each experiment. Record the experiment configuration and results; change one major variable at a time wherever possible.
-
-### Evaluation limitations
-
-- Only three short Markdown source documents and four stored chunks.
-- Twelve questions, mainly derived directly from reference text.
-- Source-file labels can conceal missing or irrelevant passages.
-- The three manually assessed difficult cases are not representative of the full dataset.
-- No evaluation of LLM-generated answers yet, because the LLM generation step has not been implemented.
-- No systematic measurement of latency, retrieval failure modes, or unsupported questions yet.
-
-The current metrics are an **exploratory engineering baseline**, not a production performance claim.
-
-Detailed methodology and follow-up experiments: [`docs/rag_evaluation.md`](docs/rag_evaluation.md).
+The documented workflow publishes images to **GitHub Container Registry** on successful pushes to `main`, using `latest` and the commit SHA as tags. This is **image publication**, not an automatic deployment to an application environment.
 
 ## Repository structure
 
@@ -246,140 +381,81 @@ Detailed methodology and follow-up experiments: [`docs/rag_evaluation.md`](docs/
 FareAudit-ai/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                 # Tests and Docker image publishing
+│       └── ci.yml
 ├── src/
 │   └── fareaudit/
-│       ├── schemas.py             # Pydantic request models
-│       ├── inference.py           # Prediction and feature preparation
-│       ├── document_loader.py     # Load and split documents
-│       ├── embeddings.py          # Embedding model configuration
-│       ├── vector_store.py        # ChromaDB and indexing logic
-│       ├── retriever.py           # Semantic retrieval configuration
-│       ├── services/              # Application service layer
-│       └── routers/               # FastAPI route handlers
+│       ├── document_loader.py    # Knowledge ingestion / chunking
+│       ├── embeddings.py         # Multilingual embeddings
+│       ├── vector_store.py       # ChromaDB access and indexing
+│       ├── retriever.py          # Retrieval strategy and parameters
+│       ├── inference.py          # Anomaly prediction logic
+│       ├── schemas.py            # API input / output schemas
+│       ├── services/             # Application services
+│       └── routers/              # FastAPI endpoints
 ├── scripts/
-│   └── index_knowledge.py         # Manual knowledge-index rebuild
+│   └── index_knowledge.py        # Knowledge index rebuild
 ├── docs/
-│   └── rag_evaluation.md          # Detailed retrieval evaluation report
-├── tests/                         # Automated Python tests
-├── knowledge/                     # Source Markdown documents
-├── models/                        # Serialized ML artifacts
-├── chroma_db/                     # Persistent local vector index
-├── data/                          # Input data
-├── evaluate_retriever.py          # Retrieval evaluation entry point
-├── main.py                        # FastAPI entry point
-├── train_model.py                 # Model training entry point
-├── requirements.txt               # Python dependencies
-├── Dockerfile                     # Container image definition
-└── .dockerignore                  # Docker build-context exclusions
+│   └── rag_evaluation.md         # Optional detailed experiment log
+├── tests/                        # Automated tests
+├── knowledge/                    # Reference documentation
+├── data/                         # Input datasets
+├── models/                       # Serialized ML artifacts
+├── chroma_db/                    # Persistent vector index
+├── evaluate_retriever.py         # Retrieval benchmark
+├── train_model.py                # Model training
+├── main.py                       # FastAPI application
+├── requirements.txt
+├── Dockerfile
+└── README.md
 ```
 
-*This tree highlights the main modules and expected documentation file. Create `docs/rag_evaluation.md` if you have not saved the detailed report yet; consult the repository for the complete structure.*
+This is a representative project layout based on the documented modules. `docs/rag_evaluation.md` is an optional companion report; create it if you want to keep extended experiment records outside the README.
 
-## Getting started
+## Engineering decisions and limitations
 
-### Prerequisites
+| Design decision | Rationale / current boundary |
+|---|---|
+| Isolation Forest | Unsupervised anomaly signal without known fraud labels |
+| Chronological train/test split | Preserves time ordering in the recorded experiment |
+| Saved feature metadata | Helps align training and inference inputs |
+| Multilingual MiniLM | Supports French questions over English documentation |
+| Persistent ChromaDB | Reusable local vector index |
+| MMR, `k=5` | Best observed passage coverage with five returned chunks on the current benchmark |
+| Explicit indexing operation | Prevents silently mixing incompatible embeddings or stale chunks |
+| Separate retrieval benchmark | Measures real search behavior independently of fast unit tests |
+| Docker and GitHub Actions | Reproducible packaging, tests, and traceable image publishing |
 
-- Python 3.11
-- `pip` and Python virtual environments
-- Docker for containerized execution
-- The dataset and model artifacts required for the workflow being executed
+**Limitations to keep in mind:**
 
-### Install dependencies
+- The retrieval benchmark has only **24 questions**, with several similar or overlapping answer targets.
+- Expected source-plus-fragment matching can miss semantically correct results and is not a human-annotated relevance gold standard.
+- Hyperparameters were chosen using these same questions; **held-out evaluation is still needed**.
+- `fetch_k`, chunking parameters, retrieval latency, and downstream context-token cost are not yet independently optimized.
+- A top-K retrieval hit does **not** establish the correctness or faithfulness of an LLM answer.
+- Isolation Forest flags unusual patterns; it does **not** prove fraud.
+- The project does **not yet** implement an LLM answer-generation layer.
 
-From the repository root:
+## Roadmap
 
-```bash
-python3.11 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
+- [x] Implement anomaly-detection training and inference pipeline
+- [x] Serve predictions via FastAPI
+- [x] Index PDF and Markdown reference material with multilingual embeddings
+- [x] Benchmark Similarity and MMR on 24 French/English questions
+- [x] Select a provisional retriever baseline from measured results
+- [ ] **Next:** compare chunk sizes, overlaps, and field-aware / structure-aware splitting
+- [ ] Evaluate `fetch_k` independently and measure latency / token cost
+- [ ] Add new, held-out questions and passage-level relevance annotations
+- [ ] Investigate hybrid keyword + vector search for exact field codes
+- [ ] Evaluate reranking for top-result relevance
+- [ ] Add grounded LLM answer generation with evidence citations
+- [ ] Test unsupported questions and abstention behavior
 
-### Train the model
+## Data source
 
-Place the source Parquet data at the path configured by the training script. The initial workflow uses `data/raw/yellow_tripdata_2025-01.parquet`.
+- [NYC Taxi & Limousine Commission — TLC Trip Record Data](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page)
 
-```bash
-python train_model.py
-```
-
-The trained model is expected at `models/isolation_forest.joblib`. Ensure that the required model artifact is available when running inference.
-
-### Run the API locally
-
-```bash
-uvicorn main:app --host 127.0.0.1 --port 8000 --reload
-```
-
-Open **http://127.0.0.1:8000/docs** to explore the available FastAPI routes and request schemas.
-
-### Build and run with Docker
-
-```bash
-docker build -t fareaudit:1.0 .
-
-docker run --rm --name fareaudit-api \
-  -p 127.0.0.1:8000:8000 \
-  fareaudit:1.0
-```
-
-The Docker image packages the application and its installed dependencies. Ensure that any model artifacts or persistent retrieval data required at runtime are included in the image or made available through appropriate mounts.
-
-## Testing and quality engineering
-
-FareAudit AI uses **pytest** to validate the application's behavior. Unit tests cover input validation and inference contracts, with `Mock` and `monkeypatch` allowing model-dependent logic to be tested independently of model loading or the actual estimator.
-
-Run the test suite locally:
-
-```bash
-python -m pytest tests/ -v
-```
-
-This approach helps keep tests fast, focused, and independent of external model artifacts where appropriate. The Retriever benchmark is a separate **integration/evaluation run** that loads real embeddings and reads the real local vector index. It is **not** equivalent to a mocked unit test and may be kept outside the fast CI suite until a reproducible evaluation corpus/index fixture is available.
-
-## CI and automated container delivery
-
-The GitHub Actions workflow is defined in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
-
-It implements a dependency-aware delivery process:
-
-```mermaid
-flowchart LR
-    A[Push or pull request] --> B[Python setup]
-    B --> C[Install dependencies]
-    C --> D[pytest]
-    D -->|Successful push to main| E[Docker Buildx]
-    E --> F[GHCR authentication]
-    F --> G[Build and publish image]
-```
-
-**CI checks:** pushes and pull requests trigger the `tests` job, which installs project dependencies and runs pytest on a GitHub-hosted Ubuntu runner.
-
-**Container publishing:** on successful pushes to `main`, the `build-and-push` job builds the Docker image and publishes it to **GitHub Container Registry (`ghcr.io`)**. The image is tagged using both `latest` and the Git commit SHA, providing a direct link between the published artifact and its source revision.
-
-**Release safety:** the publication job declares `needs: tests`, so it does not run when the test job fails. The workflow automates image delivery; deployment to a runtime environment is a separate operation.
-
-## Engineering choices
-
-| Choice | Engineering rationale |
-| --- | --- |
-| **Isolation Forest** | Detects unusual multivariate patterns without requiring labeled anomaly examples |
-| **Chronological evaluation split** | Preserves temporal ordering between training and evaluation data |
-| **Model-aware feature alignment** | Prevents column-order and categorical-encoding mismatches during inference |
-| **Pydantic** | Makes the inference input contract explicit and validates requests before model execution |
-| **Modular inference and retrieval** | Keeps model predictions and document search independently testable |
-| **Versioned retrieval evaluation** | Preserves a baseline and makes changes in retrieval quality measurable |
-| **Explicit index rebuilds in development** | Prevents stale chunks from contaminating search results during experiments |
-| **Docker** | Packages application dependencies and runtime configuration in a portable image |
-| **GitHub Actions + GHCR** | Couples automated tests to traceable, commit-tagged container publication |
-
-## Dataset
-
-The initial modeling workflow is based on the **NYC Taxi & Limousine Commission (TLC) Yellow Taxi Trip Records**, January 2025. The dataset is used for fare-pattern analysis and unsupervised anomaly detection.
-
-Source: [NYC TLC Trip Record Data](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page).
+The dataset and reference documentation are used for technical experimentation and contextual interpretation. Rules contained in `investigation_rules.md` are exploratory project notes, not official TLC fraud classifications.
 
 ---
 
-**FareAudit AI** · Machine Learning Engineering · Anomaly Detection · FastAPI · Retrieval · MLOps
+**FareAudit AI** · Machine Learning Engineering · Anomaly Detection · Multilingual Retrieval · MLOps
