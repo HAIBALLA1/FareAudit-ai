@@ -29,7 +29,14 @@ def index_documents():
 
     db =get_vector_store()
 
+    # Supprime les anciens chunks de la collection
+    db.reset_collection()
+
     ids=[f"chunk-{i}"  for i in range(len(chunks))]
     db.add_documents(chunks , ids=ids)
 
+    print(f"Documents chargés : {len(documents)}")
+    print(f"Chunks indexés : {len(chunks)}")
+
     return db
+

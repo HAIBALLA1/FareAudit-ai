@@ -64,6 +64,23 @@ def test_infinit_field_forbidden(invalid_value ,field ):
     with pytest.raises(ValidationError):
         TripInput(**data)
 
+def test_invalid_payment_type():
+    data={
+        **VALID_TRIP,
+        "payment_type": 7,
+
+    }
+    with pytest.raises(ValidationError):
+        TripInput(**data)
+
+def test_invalid_pickup_hour():
+    data={
+        **VALID_TRIP,
+        "pickup_hour": 27,
+    }
+    with pytest.raises(ValidationError):
+        TripInput(**data)
+
 
 def test_PredictionOutput():
     model_output = PredictionOutput(**INFR_RESULT)

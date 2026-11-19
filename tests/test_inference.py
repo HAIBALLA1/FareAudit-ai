@@ -15,7 +15,7 @@ VALID_TRIP ={
     "payment_type" : 1
 }
 
-feature_columns = [
+FEATURE_COLUMNS = [
     "trip_distance",
     "fare_amount",
     "tip_amount",
@@ -47,11 +47,16 @@ def test_predict_trip_anomaly(monkeypatch):
                         lambda trip, feature_columns: fake_X)
 
     result = inference.predict_trip(trip)
+
     assert result ==  {     "prediction": -1,
                             "is_anomaly": True,
                             "anomaly_score": -0.08,
                         }
 
+    fake_model.predict.assert_called_once_with(fake_X)
+    fake_model.decision_function.assert_called_once_with(fake_X)
+
+#elle sert plutot a rien vu que ca va etre decaler par pydantic avant que ca arrive a notre methode
 def test_prepare_trip_features():
     data = {**VALID_TRIP , "payment_type" : 7}
 

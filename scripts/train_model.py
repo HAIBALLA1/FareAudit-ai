@@ -5,7 +5,7 @@ from src.fareaudit.data_loader import load_sample
 from src.fareaudit.data_preprocessing import prepare_data
 from src.fareaudit.features import chronological_split, encode_features
 from src.fareaudit.modeling import train_model, predict_test
-from src.fareaudit.reporting import print_report
+
 
 
 def save_model(model, X_train, train_df):
@@ -43,7 +43,6 @@ def main():
         anomaly_score=scores,
     )
 
-    print_report(results_df)
     save_model(model, X_train, train_df)
 
 

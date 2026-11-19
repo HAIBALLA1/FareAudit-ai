@@ -30,8 +30,8 @@ def split_documents(documents):
 
     # 4. Créer le découpeur
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=300,
-        chunk_overlap=50
+        chunk_size=800,
+        chunk_overlap=100,
     )
 
     # 5. Découper tous les documents

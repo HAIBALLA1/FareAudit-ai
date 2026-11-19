@@ -17,7 +17,7 @@ FareAudit AI addresses this problem with two complementary capabilities:
 - **ML-based anomaly detection:** an Isolation Forest model identifies statistically unusual trip records and exposes its decisions through a structured REST API.
 - **Contextual document retrieval:** an embedding-based search pipeline indexes reference material in ChromaDB and retrieves relevant passages for investigation.
 
-The prediction and retrieval components are deliberately decoupled, allowing them to be developed, tested, and operated independently.
+The prediction and retrieval components are deliberately decoupled, allowing them to be developed, tested, and operated independently. **The current retrieval capability returns source passages; LLM-based answer generation is planned, not yet part of the implemented pipeline.**
 
 ## Key capabilities
 
@@ -29,6 +29,7 @@ The prediction and retrieval components are deliberately decoupled, allowing the
 | Model serving | Expose structured predictions and anomaly scores through FastAPI |
 | Input validation | Enforce request contracts with Pydantic |
 | Semantic retrieval | Generate Hugging Face embeddings, index passages in ChromaDB, and retrieve them with LangChain |
+| Retrieval evaluation | Benchmark document retrieval with a manually curated question set and source-level Hit@K metrics |
 | Automated tests | Run pytest checks through GitHub Actions on pushes and pull requests |
 | Container delivery | Build Docker images and automatically publish commit-tagged images to GitHub Container Registry after successful CI checks on `main` |
 
@@ -58,6 +59,12 @@ flowchart TD
         N --> M
         N --> O[Relevant document passages]
     end
+
+    subgraph Evaluation[Retrieval evaluation]
+        P[Curated questions and expected sources] --> Q[Retriever evaluation script]
+        Q --> N
+        Q --> R[Hit at 1 and Hit at 3]
+    end
 ```
 
 ### Design principles
@@ -67,6 +74,8 @@ flowchart TD
 **Separation of concerns.** Input validation, feature preparation, model inference, and document retrieval have distinct responsibilities, keeping the system easier to maintain and test.
 
 **Reproducible delivery.** The application is containerized, and the CI workflow builds and publishes Docker images only after automated checks pass on the `main` branch.
+
+**Evidence-based retrieval improvements.** Retrieval changes are evaluated against a documented baseline, with a consistent question set and a freshly rebuilt index when chunking or embeddings change.
 
 ## Data pipeline and anomaly detection
 
@@ -121,12 +130,115 @@ In scikit-learn's Isolation Forest, `-1` indicates an outlier and `1` indicates 
 
 The document-retrieval pipeline complements the anomaly detector with searchable reference material. It:
 
-1. Loads and splits source documents into passages.
-2. Generates embeddings using a Hugging Face sentence-transformer model.
-3. Stores vector representations in **ChromaDB**.
-4. Retrieves passages relevant to a query using **LangChain**.
+1. Loads Markdown reference documents from `knowledge/`.
+2. Splits documents into chunks and preserves source-file metadata.
+3. Generates embeddings using a Hugging Face sentence-transformer model (MiniLM in the current baseline).
+4. Stores vector representations in a persistent **ChromaDB** collection.
+5. Uses **LangChain** to retrieve relevant passages for a query.
 
-This component supports context discovery alongside model predictions without coupling the retrieval pipeline to anomaly scoring.
+The current retrieval endpoint exposes the retrieved content and sources for investigation. It does **not** yet generate natural-language answers with an LLM. An answer-generation layer with citations is planned.
+
+### Current retrieval baseline
+
+| Setting | Current value |
+| --- | --- |
+| Embedding model | Sentence Transformers / MiniLM |
+| Vector database | ChromaDB (`fareaudit_knowledge`) |
+| Retrieval | Vector similarity, top 3 chunks |
+| Chunk size | 800 characters |
+| Chunk overlap | 100 characters |
+| Knowledge corpus | 3 Markdown files |
+| Indexed chunks | 4 after a clean rebuild |
+
+The knowledge corpus currently contains:
+
+- `payment_types.md` — NYC taxi payment codes and their interpretation.
+- `financial_fields.md` — definitions of fares, tips, totals, and trip distance.
+- `investigation_rules.md` — **experimental project rules**, not official NYC TLC fraud rules.
+
+These settings describe the **current baseline**, not permanently fixed design choices. Future experiments will compare chunking, embeddings, retrieval methods, and ranking strategies.
+
+### Rebuild the knowledge index
+
+Indexing is a separate development operation, similar to model training:
+
+```bash
+python -m scripts.index_knowledge
+```
+
+The current `index_documents()` implementation uses a **full collection reset** before indexing. Run this operation deliberately, preferably with the API stopped. It deletes the existing vectors in `fareaudit_knowledge` and recreates the index; it is **not** an incremental or zero-downtime production ingestion pipeline.
+
+Rebuild the index whenever you change the reference documents, chunking parameters, or embedding configuration. Verify that the stored chunk count matches the count produced by the current document splitter. Future work will introduce stable document/chunk identifiers and incremental updates.
+
+## Retriever evaluation
+
+FareAudit AI includes an experimental retrieval benchmark in [`evaluate_retriever.py`](evaluate_retriever.py). The benchmark tests whether the Retriever can find information needed to answer questions about NYC taxi transactions and the project's investigation rules.
+
+### Evaluation setup
+
+- **Evaluation set:** 12 manually written questions based on the three indexed Markdown documents.
+- **Reference labels:** one expected source file per question.
+- **Retrieval depth:** top 3 chunks per query; Hit@1 is computed from the first of those three results.
+- **Execution:** the real embedding model and ChromaDB collection are used, rather than mocked retrieval results.
+
+Run the evaluation from the repository root:
+
+```bash
+python evaluate_retriever.py
+```
+
+### Baseline results
+
+*Snapshot: November 2026. Refresh this table after each documented experimental run rather than treating these values as fixed benchmarks.*
+
+| Metric | Result | Scope |
+| --- | ---: | --- |
+| **Hit@1** | **75%** (9/12) | 12 questions; expected source-file matching |
+| **Hit@3** | **100%** (12/12) | 12 questions; expected source-file matching |
+| **Precision@3** | **33.3%** | Manual, strict passage-level annotations on **3 selected questions** |
+| **MRR** | **0.444** | Manual, strict passage-level annotations on the **same 3 questions** |
+
+**Important interpretation:** Hit@K checks whether at least one retrieved chunk belongs to the expected **file**, not whether that chunk contains the answer. Precision@3 and MRR were calculated separately from manual relevance judgments on three questions whose expected file was not ranked first; **they are not full-dataset scores**. The manually evaluated sample is deliberately difficult and should not be generalized to all queries.
+
+With only four indexed chunks, retrieving three chunks covers most of the corpus. The perfect Hit@3 therefore **does not demonstrate production-quality retrieval**.
+
+### What the evaluation revealed
+
+The first attempt to change chunk size left obsolete vectors in ChromaDB: **12 chunks remained indexed while the updated splitter produced only 4**. Consequently, irrelevant historical fragments sometimes appeared at the top of retrieval results.
+
+A clean collection rebuild synchronized the stored vectors with the current chunking configuration. After the rebuild, the query **“What does `fare_amount` represent?”** retrieved `financial_fields.md` in first position. However, the **overall source-level Hit@1 remained 75%** across the 12-question benchmark; changing the ranking on one query did not improve the aggregate score.
+
+Because the earlier index contained stale chunks, this comparison does **not isolate the effect of chunk size**. Future controlled experiments must rebuild their indexes consistently before comparing configurations.
+
+### Planned retrieval experiments
+
+The project will evolve through measurable experiments rather than assuming that one technique is always better:
+
+| Experiment | What will change | What will be measured | Status |
+| --- | --- | --- | --- |
+| Larger corpus | Add verified reference documents and more varied questions | Hit@K, ranking quality, coverage | Planned |
+| Passage-level labels | Identify relevant chunk IDs/content rather than only filenames | Precision@K, Recall@K, MRR, potentially nDCG | Planned |
+| Chunking comparison | Compare chunk sizes, overlaps, and Markdown-aware splitting | Retrieval quality and context usefulness | Planned |
+| Embedding comparison | Compare embedding models suited to the query language | Ranking quality and retrieval latency | Planned |
+| Hybrid search | Combine vector retrieval with lexical keyword matching (e.g., BM25) | Accuracy on exact field names and paraphrases | Planned |
+| Reranking | Reorder candidate passages using a reranker | Precision@K and MRR | Planned |
+| No-answer queries | Add questions unsupported by the corpus | False retrieval confidence and abstention behavior | Planned |
+| LLM answer generation | Compose grounded answers from retrieved evidence | Answer correctness, faithfulness, source attribution | Planned |
+
+For meaningful comparisons, keep the **same evaluation questions, relevance judgments, corpus version, and retrieval depth** for each experiment. Record the experiment configuration and results; change one major variable at a time wherever possible.
+
+### Evaluation limitations
+
+- Only three short Markdown source documents and four stored chunks.
+- Twelve questions, mainly derived directly from reference text.
+- Source-file labels can conceal missing or irrelevant passages.
+- The three manually assessed difficult cases are not representative of the full dataset.
+- No evaluation of LLM-generated answers yet, because the LLM generation step has not been implemented.
+- No systematic measurement of latency, retrieval failure modes, or unsupported questions yet.
+
+The current metrics are an **exploratory engineering baseline**, not a production performance claim.
+
+Detailed methodology and follow-up experiments: [`docs/rag_evaluation.md`](docs/rag_evaluation.md).
 
 ## Repository structure
 
@@ -134,24 +246,35 @@ This component supports context discovery alongside model predictions without co
 FareAudit-ai/
 ├── .github/
 │   └── workflows/
-│       └── ci.yml             # Tests and Docker image publishing
+│       └── ci.yml                 # Tests and Docker image publishing
 ├── src/
 │   └── fareaudit/
-│       ├── schemas.py         # Pydantic request models
-│       └── inference.py       # Prediction and feature preparation integration
-├── tests/                     # Automated Python tests
-├── models/                    # Model artifacts
-├── knowledge/                 # Documents used for retrieval
-├── chroma_db/                 # Local vector database
-├── data/                      # Input data
-├── main.py                    # FastAPI entry point
-├── train_model.py             # Model training entry point
-├── requirements.txt           # Python dependencies
-├── Dockerfile                 # Container image definition
-└── .dockerignore              # Docker build-context exclusions
+│       ├── schemas.py             # Pydantic request models
+│       ├── inference.py           # Prediction and feature preparation
+│       ├── document_loader.py     # Load and split documents
+│       ├── embeddings.py          # Embedding model configuration
+│       ├── vector_store.py        # ChromaDB and indexing logic
+│       ├── retriever.py           # Semantic retrieval configuration
+│       ├── services/              # Application service layer
+│       └── routers/               # FastAPI route handlers
+├── scripts/
+│   └── index_knowledge.py         # Manual knowledge-index rebuild
+├── docs/
+│   └── rag_evaluation.md          # Detailed retrieval evaluation report
+├── tests/                         # Automated Python tests
+├── knowledge/                     # Source Markdown documents
+├── models/                        # Serialized ML artifacts
+├── chroma_db/                     # Persistent local vector index
+├── data/                          # Input data
+├── evaluate_retriever.py          # Retrieval evaluation entry point
+├── main.py                        # FastAPI entry point
+├── train_model.py                 # Model training entry point
+├── requirements.txt               # Python dependencies
+├── Dockerfile                     # Container image definition
+└── .dockerignore                  # Docker build-context exclusions
 ```
 
-*The `src/fareaudit/` directory is shown with representative modules; consult the repository for its full contents.*
+*This tree highlights the main modules and expected documentation file. Create `docs/rag_evaluation.md` if you have not saved the detailed report yet; consult the repository for the complete structure.*
 
 ## Getting started
 
@@ -213,7 +336,7 @@ Run the test suite locally:
 python -m pytest tests/ -v
 ```
 
-This approach helps keep tests fast, focused, and independent of external model artifacts where appropriate.
+This approach helps keep tests fast, focused, and independent of external model artifacts where appropriate. The Retriever benchmark is a separate **integration/evaluation run** that loads real embeddings and reads the real local vector index. It is **not** equivalent to a mocked unit test and may be kept outside the fast CI suite until a reproducible evaluation corpus/index fixture is available.
 
 ## CI and automated container delivery
 
@@ -246,6 +369,8 @@ flowchart LR
 | **Model-aware feature alignment** | Prevents column-order and categorical-encoding mismatches during inference |
 | **Pydantic** | Makes the inference input contract explicit and validates requests before model execution |
 | **Modular inference and retrieval** | Keeps model predictions and document search independently testable |
+| **Versioned retrieval evaluation** | Preserves a baseline and makes changes in retrieval quality measurable |
+| **Explicit index rebuilds in development** | Prevents stale chunks from contaminating search results during experiments |
 | **Docker** | Packages application dependencies and runtime configuration in a portable image |
 | **GitHub Actions + GHCR** | Couples automated tests to traceable, commit-tagged container publication |
 
